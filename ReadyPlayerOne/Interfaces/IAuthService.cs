@@ -6,6 +6,8 @@ namespace ReadyPlayerOne.Interfaces
     public interface IAuthService
     {
         Task<IdentityResult> RegisterAsync(RegisterRequest request);
-        Task<AuthResponse?> LoginAsync(LoginRequest request);
+        Task<AuthSessionResult?> LoginAsync(LoginRequest request);
+        Task<AuthSessionResult?> RefreshAsync(string refreshToken);
+        Task LogoutAsync(string refreshToken);
     }
 }

@@ -22,28 +22,33 @@ namespace ReadyPlayerOne.Services
         }
         public async Task<AuthResponse> GenerateTokenAsync(ApplicationUser user)
         {
-            var jwtSettings = _configuration.GetSection("Jwt");
+            var settings = _configuration.GetSection("Jwt");
 
-            var key = jwtSettings["Key"]
-                ?? throw new InvalidOperationException("JWT key is missing.");
-            var issuer = jwtSettings["Issuer"];
-            var audience = jwtSettings["Audience"];
-            var expirationMinutes = int.Parse(jwtSettings["ExpirationMinutes"] ?? "30");
-            var expiresAt = DateTime.UtcNow.AddMinutes(expirationMinutes);
+            var key = settings["Key"]
+                ?? throw new InvalidOperationException("JWT key missing.");
+
+            var issuer = settings["Issuer"]
+                ?? throw new InvalidOperationException("JWT issuer missing.");
+
+            var audience = settings["Audience"]
+                ?? throw new InvalidOperationException("JWT audience missing.");
+
+            var expiresAt = DateTime.UtcNow.AddMinutes(10);
 
             var roles = await _userManager.GetRolesAsync(user);
 
             var claims = new List<Claim>
             {
                 new(JwtRegisteredClaimNames.Sub, user.Id),
-                new(JwtRegisteredClaimNames.UniqueName, user.UserName!),
-                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new(JwtRegisteredClaimNames.UniqueName, user.UserName ?? "")
             };
 
             foreach (var role in roles)
                 claims.Add(new Claim(ClaimTypes.Role, role));
 
             var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+
             var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
 
             var token = new JwtSecurityToken(

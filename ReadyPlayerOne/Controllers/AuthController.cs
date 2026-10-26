@@ -1,8 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using ReadyPlayerOne.DTOs.Auth;
 using ReadyPlayerOne.Interfaces;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace ReadyPlayerOne.Controllers
 {
@@ -17,9 +17,6 @@ namespace ReadyPlayerOne.Controllers
             _authService = authService;
         }
 
-        /// <summary>
-        /// Registers a new player.
-        /// </summary>
         [HttpPost("register")]
         [AllowAnonymous]
         public async Task<IActionResult> Register(
@@ -34,9 +31,6 @@ namespace ReadyPlayerOne.Controllers
             return StatusCode(StatusCodes.Status201Created);
         }
 
-        /// <summary>
-        /// Authenticates a player and returns a JWT.
-        /// </summary>
         [HttpPost("login")]
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponse>> Login(
@@ -48,7 +42,70 @@ namespace ReadyPlayerOne.Controllers
                 {
                     Message = "Invalid credentials."
                 });
-            return Ok(result);
+            SetRefreshTokenCookie(result.RefreshToken);
+            return Ok(result.Access);
+        }
+
+        [HttpPost("refresh")]
+        [AllowAnonymous]
+        public async Task<ActionResult<AuthResponse>> Refresh()
+        {
+            if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken))
+                return Unauthorized();
+
+            var result = await _authService.RefreshAsync(refreshToken);
+            if (result == null)
+            {
+                DeleteRefreshTokenCookie();
+                return Unauthorized();
+            }
+
+            SetRefreshTokenCookie(result.RefreshToken);
+            return Ok(result.Access);
+        }
+        
+        [HttpPost("logout")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Logout()
+        {
+            if (Request.Cookies.TryGetValue("refreshToken", out var refreshToken))
+                await _authService.LogoutAsync(refreshToken);
+
+            DeleteRefreshTokenCookie();
+            return NoContent();
+        }
+
+        [HttpGet("me")]
+        [Authorize]
+        public IActionResult Me()
+        {
+            return Ok(new
+            {
+                UserId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value,
+                UserName = User.FindFirst(JwtRegisteredClaimNames.UniqueName)?.Value
+            });
+        }
+
+        private void SetRefreshTokenCookie(string refreshToken)
+        {
+            Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Strict,
+                Expires = DateTimeOffset.UtcNow.AddDays(7),
+                Path = "/api/auth"
+            });
+        }
+
+        private void DeleteRefreshTokenCookie()
+        {
+            Response.Cookies.Delete("refreshToken", new CookieOptions
+            {
+                Secure = true,
+                SameSite = SameSiteMode.Strict,
+                Path = "/api/auth"
+            });
         }
     }
 }
