@@ -147,7 +147,7 @@ var app = builder.Build();
 await IdentitySeeder.SeedRolesAsync(app.Services);
 
 // OPENAPI & SCALAR
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.MapOpenApi();
     app.MapScalarApiReference(options =>
