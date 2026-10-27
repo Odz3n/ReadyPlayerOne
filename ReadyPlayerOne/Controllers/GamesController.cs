@@ -50,7 +50,7 @@ namespace ReadyPlayerOne.Controllers
         {
             var game = await _gameService.CreateAsync(request, token);
 
-            return CreatedAtAction("GetGameById", new { id = game.Id }, game);
+            return CreatedAtRoute("GetGameById", new { id = game.Id }, game);
         }
 
         [HttpPut("{id:guid}")]
