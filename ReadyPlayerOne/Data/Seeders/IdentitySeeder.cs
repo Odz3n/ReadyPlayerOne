@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Identity;
+using ReadyPlayerOne.Models;
 
 namespace ReadyPlayerOne.Data.Seeders
 {
@@ -21,6 +22,25 @@ namespace ReadyPlayerOne.Data.Seeders
 
                 if (!result.Succeeded)
                     throw new InvalidOperationException(string.Join("; ", result.Errors.Select(e => e.Description)));
+            }
+        }
+        public static async Task SeedAdminAsync(IServiceProvider services)
+        {
+            using var scope = services.CreateScope();
+
+            var userManager = scope.ServiceProvider
+                .GetRequiredService<UserManager<ApplicationUser>>();
+
+            var user = await userManager.FindByEmailAsync("admin@example.com");
+            if (user is null)
+                throw new InvalidOperationException("Admin user not found.");
+            if (!await userManager.IsInRoleAsync(user, "Admin"))
+            {
+                var result = await userManager.AddToRoleAsync(user, "Admin");
+
+                if (!result.Succeeded)
+                    throw new InvalidOperationException(
+                        string.Join(", ", result.Errors.Select(e => e.Description)));
             }
         }
     }

@@ -8,6 +8,7 @@ using ReadyPlayerOne.Data;
 using ReadyPlayerOne.Data.Seeders;
 using ReadyPlayerOne.Interfaces;
 using ReadyPlayerOne.Models;
+using ReadyPlayerOne.Repositories;
 using ReadyPlayerOne.Services;
 using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
@@ -19,46 +20,56 @@ var builder = WebApplication.CreateBuilder(args);
 // CONTROLLERS & OPENAPI
 builder.Services.AddControllers();
 builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
     {
-        options.AddDocumentTransformer((document, context, cancellationToken) =>
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??=
+            new Dictionary<string, IOpenApiSecurityScheme>();
+
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
         {
-            document.Components ??= new Microsoft.OpenApi.OpenApiComponents();
-            document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
-            document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
-            {
-                Type = SecuritySchemeType.Http,
-                Scheme = "bearer",
-                BearerFormat = "JWT",
-                In = ParameterLocation.Header,
-                Description = "Enter your JWT Access Token."
-            };
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Enter your JWT Access Token."
+        };
 
-            return Task.CompletedTask;
-        });
-
-        options.AddOperationTransformer((operation, context, cancellationToken) =>
-        {
-            var metadata = context.Description.ActionDescriptor.EndpointMetadata;
-            var allowAnonymous = metadata.OfType<IAllowAnonymous>().Any();
-            var requiresAuthorization = metadata.OfType<IAuthorizeData>().Any();
-            if (!requiresAuthorization || allowAnonymous)
-                return Task.CompletedTask;
-
-            operation.Security ??= [];
-            operation.Security.Add(new OpenApiSecurityRequirement
-            {
-                [new OpenApiSecuritySchemeReference("Bearer", context.Document)] = []
-            });
-
-            return Task.CompletedTask;
-        });
+        return Task.CompletedTask;
     });
+
+    options.AddOperationTransformer((operation, context, cancellationToken) =>
+    {
+        var metadata = context.Description.ActionDescriptor.EndpointMetadata;
+        var allowAnonymous = metadata.OfType<IAllowAnonymous>().Any();
+        var requiresAuthorization = metadata.OfType<IAuthorizeData>().Any();
+        if (!requiresAuthorization || allowAnonymous)
+            return Task.CompletedTask;
+
+        operation.Security ??= [];
+        operation.Security.Add(new OpenApiSecurityRequirement
+        {
+            [new OpenApiSecuritySchemeReference("Bearer", context.Document)] = []
+        });
+
+        return Task.CompletedTask;
+    });
+});
 
 // DATABASE
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection")
-        ?? throw new InvalidOperationException("Database connection string is missing.")));
+        ?? throw new InvalidOperationException(
+            "Database connection string is missing."),
+        sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(15),
+                errorNumbersToAdd: null);
+        }));
 
 // IDENTITY
 builder.Services.AddDataProtection();
@@ -95,7 +106,8 @@ var signingKey = new SymmetricSecurityKey(
     Encoding.UTF8.GetBytes(jwtKey));
 
 // AUTHENTICATION
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.MapInboundClaims = false;
@@ -121,20 +133,36 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 // AUTHORIZATION
 builder.Services.AddAuthorization();
 
-// APPLICATION SERVICES
+// AUTHENTICATION SERVICES
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 
+// REPOSITORIES
+builder.Services.AddScoped<IRepository<Game, Guid>, GameRepository>();
+builder.Services.AddScoped<IRepository<GameSession, Guid>, GameSessionRepository>();
+builder.Services.AddScoped<IRepository<Team, Guid>, TeamRepository>();
+builder.Services.AddScoped<IRepository<SessionParticipant, Guid>, SessionParticipantRepository>();
+
+// APPLICATION SERVICES
+builder.Services.AddScoped<IGameService, GameService>();
+
 // CORS
-var clientOrigin = builder.Configuration["Client:Origin"]
-    ?? throw new InvalidOperationException("React client origin is missing.");
+var allowedOrigins = builder.Configuration
+    .GetSection("Client:AllowedOrigins")
+    .Get<string[]>()
+    ?? throw new InvalidOperationException(
+        "React client allowed origins are missing.");
+
+if (allowedOrigins.Length == 0)
+    throw new InvalidOperationException(
+        "At least one React client origin must be configured.");
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactClient", policy =>
     {
-        policy.WithOrigins(clientOrigin)
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -145,16 +173,15 @@ var app = builder.Build();
 
 // DATABASE INITIALIZATION
 await IdentitySeeder.SeedRolesAsync(app.Services);
+await IdentitySeeder.SeedAdminAsync(app.Services);
 
 // OPENAPI & SCALAR
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+app.MapOpenApi();
+
+app.MapScalarApiReference(options =>
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference(options =>
-    {
-        options.AddPreferredSecuritySchemes("Bearer");
-    });
-}
+    options.AddPreferredSecuritySchemes("Bearer");
+});
 
 // MIDDLEWARE
 app.UseHttpsRedirection();
@@ -168,19 +195,21 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
 
-    var isCookieEndpoint = 
+    var isCookieEndpoint =
         path.Equals("/api/auth/refresh", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
 
     if (isCookieEndpoint && HttpMethods.IsPost(context.Request.Method))
     {
         var origin = context.Request.Headers.Origin.ToString();
-        if (!string.Equals(origin, clientOrigin, StringComparison.Ordinal))
+
+        if (!allowedOrigins.Contains(origin, StringComparer.Ordinal))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
     }
+
     await next();
 });
 
