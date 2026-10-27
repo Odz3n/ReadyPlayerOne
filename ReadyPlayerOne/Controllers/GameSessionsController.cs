@@ -4,6 +4,7 @@ using ReadyPlayerOne.DTOs.Common;
 using ReadyPlayerOne.DTOs.GameSessions;
 using ReadyPlayerOne.Interfaces;
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace ReadyPlayerOne.Controllers
 {
@@ -18,8 +19,10 @@ namespace ReadyPlayerOne.Controllers
             _sessionService = sessionService;
         }
 
-        private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? throw new UnauthorizedAccessException("User ID not found in token.");
+        private string CurrentUserId =>
+            User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                ?? throw new UnauthorizedAccessException("User ID not found in token.");
 
         private bool IsAdmin => User.IsInRole("Admin");
 
