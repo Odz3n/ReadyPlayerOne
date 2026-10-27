@@ -31,7 +31,7 @@ namespace ReadyPlayerOne.Data.Seeders
             var userManager = scope.ServiceProvider
                 .GetRequiredService<UserManager<ApplicationUser>>();
 
-            var user = await userManager.FindByEmailAsync("admin@example.com");
+            var user = await userManager.FindByEmailAsync("libertadintegra@gmail.com");
             if (user is null)
                 throw new InvalidOperationException("Admin user not found.");
             if (!await userManager.IsInRoleAsync(user, "Admin"))

@@ -153,5 +153,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .HasPrincipalKey(t => new { t.GameSessionId, t.Id })
                 .OnDelete(DeleteBehavior.NoAction);
         });
+
+        builder.Entity<ApplicationUser>(e =>
+        {
+            e.Property(u => u.AvatarUrl).HasMaxLength(2048);
+        });
     }
 }

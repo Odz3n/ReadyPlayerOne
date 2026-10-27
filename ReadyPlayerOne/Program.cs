@@ -149,6 +149,7 @@ builder.Services.AddScoped<IRepository<Genre, Guid>, GenreRepository>();
 // APPLICATION SERVICES
 builder.Services.AddScoped<IGameService, GameService>();
 builder.Services.AddScoped<IGenreService, GenreService>();
+builder.Services.AddScoped<IGameSessionService, GameSessionService>();
 
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));
