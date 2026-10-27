@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using ReadyPlayerOne.Configurations;
 using ReadyPlayerOne.Data;
 using ReadyPlayerOne.Data.Seeders;
 using ReadyPlayerOne.Interfaces;
@@ -147,6 +148,10 @@ builder.Services.AddScoped<IRepository<SessionParticipant, Guid>, SessionPartici
 // APPLICATION SERVICES
 builder.Services.AddScoped<IGameService, GameService>();
 
+builder.Services.Configure<SmtpSettings>(
+    builder.Configuration.GetSection("Smtp"));
+builder.Services.AddScoped<IEmailService, EmailService>();
+
 // CORS
 var allowedOrigins = builder.Configuration
     .GetSection("Client:AllowedOrigins")
@@ -202,6 +207,11 @@ app.Use(async (context, next) =>
     if (isCookieEndpoint && HttpMethods.IsPost(context.Request.Method))
     {
         var origin = context.Request.Headers.Origin.ToString();
+
+        app.Logger.LogInformation(
+            "Auth cookie request: Origin={Origin}, AllowedOrigins={AllowedOrigins}",
+            origin,
+            string.Join(", ", allowedOrigins));
 
         if (!allowedOrigins.Contains(origin, StringComparer.Ordinal))
         {

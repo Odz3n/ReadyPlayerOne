@@ -9,5 +9,7 @@ namespace ReadyPlayerOne.Interfaces
         Task<AuthSessionResult?> LoginAsync(LoginRequest request);
         Task<AuthSessionResult?> RefreshAsync(string refreshToken);
         Task LogoutAsync(string refreshToken);
+        Task<IdentityResult> ConfirmEmailAsync(string userId, string encodedToken);
+        Task ResendConfirmationAsync(string email);
     }
 }

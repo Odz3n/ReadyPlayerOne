@@ -86,6 +86,32 @@ namespace ReadyPlayerOne.Controllers
             });
         }
 
+        [HttpPost("confirm-email")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ConfirmEmail(
+            [FromBody] ConfirmEmailRequest request,
+            CancellationToken token)
+        {
+            var result = await _authService.ConfirmEmailAsync(request.UserId, request.Token);
+            if (!result.Succeeded)
+                return BadRequest(result.Errors);
+
+            return Ok(new { message = "Email confirmed successfully." });
+        }
+
+        [HttpPost("resend-confirmation")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ResendConfirmation(
+            [FromBody] ResendConfirmationRequest request)
+        {
+            await _authService.ResendConfirmationAsync(request.Email);
+
+            return Ok(new
+            {
+                message = "If the account requires confirmation, an email will be sent."
+            });
+        }
+
         private void SetRefreshTokenCookie(string refreshToken)
         {
             Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
