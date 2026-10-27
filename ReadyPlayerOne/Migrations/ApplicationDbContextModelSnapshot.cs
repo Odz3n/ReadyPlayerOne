@@ -230,6 +230,74 @@ namespace ReadyPlayerOne.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("ReadyPlayerOne.Models.Game", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Games");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.GameSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GameId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HostId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("MaxPlayers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("PlayersPerTeam")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RequiredTeams")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameId");
+
+                    b.HasIndex("HostId");
+
+                    b.ToTable("GameSessions");
+                });
+
             modelBuilder.Entity("ReadyPlayerOne.Models.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -270,6 +338,60 @@ namespace ReadyPlayerOne.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("RefreshTokens");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.SessionParticipant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("GameSessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsReady")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("JoinedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("TeamId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TeamId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("GameSessionId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("SessionParticipants");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.Team", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("GameSessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameSessionId");
+
+                    b.ToTable("Teams");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
@@ -323,6 +445,25 @@ namespace ReadyPlayerOne.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ReadyPlayerOne.Models.GameSession", b =>
+                {
+                    b.HasOne("ReadyPlayerOne.Models.Game", "Game")
+                        .WithMany("Sessions")
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ReadyPlayerOne.Models.ApplicationUser", "Host")
+                        .WithMany("HostedSessions")
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Game");
+
+                    b.Navigation("Host");
+                });
+
             modelBuilder.Entity("ReadyPlayerOne.Models.RefreshToken", b =>
                 {
                     b.HasOne("ReadyPlayerOne.Models.ApplicationUser", "User")
@@ -332,6 +473,67 @@ namespace ReadyPlayerOne.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.SessionParticipant", b =>
+                {
+                    b.HasOne("ReadyPlayerOne.Models.GameSession", "GameSession")
+                        .WithMany("Participants")
+                        .HasForeignKey("GameSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ReadyPlayerOne.Models.Team", "Team")
+                        .WithMany("Members")
+                        .HasForeignKey("TeamId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ReadyPlayerOne.Models.ApplicationUser", "User")
+                        .WithMany("Sessions")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("GameSession");
+
+                    b.Navigation("Team");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.Team", b =>
+                {
+                    b.HasOne("ReadyPlayerOne.Models.GameSession", "GameSession")
+                        .WithMany("Teams")
+                        .HasForeignKey("GameSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("GameSession");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.ApplicationUser", b =>
+                {
+                    b.Navigation("HostedSessions");
+
+                    b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.Game", b =>
+                {
+                    b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.GameSession", b =>
+                {
+                    b.Navigation("Participants");
+
+                    b.Navigation("Teams");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.Team", b =>
+                {
+                    b.Navigation("Members");
                 });
 #pragma warning restore 612, 618
         }
