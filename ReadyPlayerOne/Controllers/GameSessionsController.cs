@@ -26,9 +26,9 @@ namespace ReadyPlayerOne.Controllers
         [HttpGet]
         [AllowAnonymous]
         public async Task<ActionResult<PagedResult<GameSessionResponse>>> GetAll(
-            [FromQuery] PaginationRequest pagination, CancellationToken token)
+            [FromQuery] GameSessionQueryRequest request, CancellationToken token)
         {
-            return Ok(await _sessionService.GetAllAsync(pagination, token));
+            return Ok(await _sessionService.GetAllAsync(request, token));
         }
 
         [HttpGet("{id:guid}", Name = "GetGameSessionById")]

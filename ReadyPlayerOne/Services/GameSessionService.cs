@@ -18,40 +18,67 @@ namespace ReadyPlayerOne.Services
             _sessionRepository = sessionRepository;
         }
 
-        public async Task<PagedResult<GameSessionResponse>> GetAllAsync(PaginationRequest pagination, CancellationToken token)
+        public async Task<PagedResult<GameSessionResponse>> GetAllAsync(GameSessionQueryRequest request, CancellationToken token)
         {
-            var query = _sessionRepository.GetAllAsQueryable();
-            int totalCount = await query.CountAsync(token);
+            ArgumentNullException.ThrowIfNull(request);
 
-            var sessions = await query
-                .OrderByDescending(s => s.CreatedAt)
-                .ThenBy(s => s.Id)
-                .Skip((pagination.PageNumber - 1) * pagination.PageSize)
-                .Take(pagination.PageSize)
-                .Select(s => new GameSessionResponse
-                {
-                    Id = s.Id,
-                    GameId = s.GameId,
-                    GameName = s.Game.Name,
-                    HostId = s.HostId,
-                    Name = s.Name,
-                    Mode = s.Mode,
-                    Status = s.Status,
-                    MaxPlayers = s.MaxPlayers,
-                    CurrentPlayers = s.Participants.Count,
-                    RequiredTeams = s.RequiredTeams,
-                    PlayersPerTeam = s.PlayersPerTeam,
-                    CreatedAt = s.CreatedAt,
-                    StartedAt = s.StartedAt,
-                    EndedAt = s.EndedAt
-                })
-                .ToListAsync(token);
+            if (request.PageNumber < 1 || request.PageSize is < 1 or > 100)
+                throw new ArgumentException("Invalid pagination parameters.", nameof(request));
+
+            if (request.GameId == Guid.Empty)
+                throw new ArgumentException("GameId cannot be empty.", nameof(request));
+
+            if (request.Status.HasValue && !Enum.IsDefined(request.Status.Value))
+                throw new ArgumentException("Invalid game session status.", nameof(request));
+
+            if (request.Mode.HasValue && !Enum.IsDefined(request.Mode.Value))
+                throw new ArgumentException("Invalid session mode.", nameof(request));
+
+            IQueryable<GameSession> query = _sessionRepository.GetAllAsQueryable();
+
+            if (request.GameId.HasValue)
+                query = query.Where(s => s.GameId == request.GameId.Value);
+
+            if (request.Status.HasValue)
+                query = query.Where(s => s.Status == request.Status.Value);
+
+            if (request.Mode.HasValue)
+                query = query.Where(s => s.Mode == request.Mode.Value);
+
+            int totalCount = await query.CountAsync(token);
+            long offset = ((long)request.PageNumber - 1) * request.PageSize;
+
+            var sessions = offset > int.MaxValue
+                ? new List<GameSessionResponse>()
+                : await query
+                    .OrderByDescending(s => s.CreatedAt)
+                    .ThenBy(s => s.Id)
+                    .Skip((int)offset)
+                    .Take(request.PageSize)
+                    .Select(s => new GameSessionResponse
+                    {
+                        Id = s.Id,
+                        GameId = s.GameId,
+                        GameName = s.Game.Name,
+                        HostId = s.HostId,
+                        Name = s.Name,
+                        Mode = s.Mode,
+                        Status = s.Status,
+                        MaxPlayers = s.MaxPlayers,
+                        CurrentPlayers = s.Participants.Count,
+                        RequiredTeams = s.RequiredTeams,
+                        PlayersPerTeam = s.PlayersPerTeam,
+                        CreatedAt = s.CreatedAt,
+                        StartedAt = s.StartedAt,
+                        EndedAt = s.EndedAt
+                    })
+                    .ToListAsync(token);
 
             return new PagedResult<GameSessionResponse>
             {
                 Items = sessions,
-                PageNumber = pagination.PageNumber,
-                PageSize = pagination.PageSize,
+                PageNumber = request.PageNumber,
+                PageSize = request.PageSize,
                 TotalCount = totalCount
             };
         }
