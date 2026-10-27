@@ -144,9 +144,11 @@ builder.Services.AddScoped<IRepository<Game, Guid>, GameRepository>();
 builder.Services.AddScoped<IRepository<GameSession, Guid>, GameSessionRepository>();
 builder.Services.AddScoped<IRepository<Team, Guid>, TeamRepository>();
 builder.Services.AddScoped<IRepository<SessionParticipant, Guid>, SessionParticipantRepository>();
+builder.Services.AddScoped<IRepository<Genre, Guid>, GenreRepository>();
 
 // APPLICATION SERVICES
 builder.Services.AddScoped<IGameService, GameService>();
+builder.Services.AddScoped<IGenreService, GenreService>();
 
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));

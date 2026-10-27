@@ -53,7 +53,10 @@ namespace ReadyPlayerOne.Repositories
                 return;
 
             existing.Name = entity.Name;
+            existing.Slug = entity.Slug;
             existing.Description = entity.Description;
+            existing.GenreId = entity.GenreId;
+            existing.CoverImageUrl = entity.CoverImageUrl;
 
             await _context.SaveChangesAsync(token);
         }
