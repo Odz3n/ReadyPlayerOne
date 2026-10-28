@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using ReadyPlayerOne.Data;
 using ReadyPlayerOne.DTOs.Common;
 using ReadyPlayerOne.DTOs.GameSessions;
@@ -18,7 +19,7 @@ namespace ReadyPlayerOne.Services
             _sessionRepository = sessionRepository;
         }
 
-        public async Task<PagedResult<GameSessionResponse>> GetAllAsync(GameSessionQueryRequest request, CancellationToken token)
+        public async Task<PagedResult<GameSessionListResponse>> GetAllAsync(GameSessionQueryRequest request, CancellationToken token)
         {
             ArgumentNullException.ThrowIfNull(request);
 
@@ -49,13 +50,13 @@ namespace ReadyPlayerOne.Services
             long offset = ((long)request.PageNumber - 1) * request.PageSize;
 
             var sessions = offset > int.MaxValue
-                ? new List<GameSessionResponse>()
+                ? new List<GameSessionListResponse>()
                 : await query
                     .OrderByDescending(s => s.CreatedAt)
                     .ThenBy(s => s.Id)
                     .Skip((int)offset)
                     .Take(request.PageSize)
-                    .Select(s => new GameSessionResponse
+                    .Select(s => new GameSessionListResponse
                     {
                         Id = s.Id,
                         GameId = s.GameId,
@@ -74,7 +75,7 @@ namespace ReadyPlayerOne.Services
                     })
                     .ToListAsync(token);
 
-            return new PagedResult<GameSessionResponse>
+            return new PagedResult<GameSessionListResponse>
             {
                 Items = sessions,
                 PageNumber = request.PageNumber,
@@ -162,42 +163,122 @@ namespace ReadyPlayerOne.Services
             return true;
         }
 
+        private Task<GameSession?> GetLockedSessionAsync(Guid id, CancellationToken token)
+        {
+            return _context.GameSessions
+                .FromSqlInterpolated($"SELECT * FROM [GameSessions] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {id}")
+                .AsNoTracking()
+                .SingleOrDefaultAsync(token);
+        }
+
         public async Task JoinAsync(Guid id, string userId, CancellationToken token)
         {
-            var session = await GetRequiredSessionAsync(id, token);
-            EnsureWaiting(session);
+            if (id == Guid.Empty)
+                throw new ArgumentException("Session ID cannot be empty.", nameof(id));
 
-            if (session.Participants.Any(p => p.UserId == userId))
-                throw new InvalidOperationException("User is already a participant.");
+            if (string.IsNullOrWhiteSpace(userId))
+                throw new UnauthorizedAccessException("User ID not found in token.");
 
-            if (session.Participants.Count >= session.MaxPlayers)
-                throw new InvalidOperationException("Session is full.");
+            var participantId = Guid.NewGuid();
+            var joinedAt = DateTime.UtcNow;
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-            _context.SessionParticipants.Add(new SessionParticipant
+            try
             {
-                Id = Guid.NewGuid(),
-                GameSessionId = id,
-                UserId = userId,
-                JoinedAt = DateTime.UtcNow
-            });
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction = await _context.Database.BeginTransactionAsync(token);
 
-            await _context.SaveChangesAsync(token);
+                    var session = await GetLockedSessionAsync(id, token)
+                        ?? throw new KeyNotFoundException($"Session with ID '{id}' not found.");
+
+                    var existingId = await _context.SessionParticipants.AsNoTracking()
+                        .Where(p => p.GameSessionId == id && p.UserId == userId)
+                        .Select(p => (Guid?)p.Id)
+                        .FirstOrDefaultAsync(token);
+
+                    if (existingId.HasValue)
+                    {
+                        if (existingId.Value != participantId)
+                            throw new InvalidOperationException("User is already a participant.");
+
+                        await transaction.CommitAsync(token);
+                        return;
+                    }
+
+                    if (session.Status != GameSessionStatus.Waiting)
+                        throw new InvalidOperationException("Session must be in Waiting status.");
+
+                    var participantCount = await _context.SessionParticipants.AsNoTracking()
+                        .CountAsync(p => p.GameSessionId == id, token);
+
+                    if (participantCount >= session.MaxPlayers)
+                        throw new InvalidOperationException("Session is full.");
+
+                    await _context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO [SessionParticipants]
+                            ([Id], [GameSessionId], [UserId], [TeamId], [JoinedAt], [IsReady])
+                        VALUES ({participantId}, {id}, {userId}, NULL, {joinedAt}, CAST(0 AS bit));
+                        """, token);
+
+                    await transaction.CommitAsync(token);
+                });
+            }
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                throw new InvalidOperationException("User is already a participant.", ex);
+            }
         }
 
         public async Task LeaveAsync(Guid id, string userId, CancellationToken token)
         {
-            var session = await GetRequiredSessionAsync(id, token);
-            EnsureWaiting(session);
+            if (id == Guid.Empty)
+                throw new ArgumentException("Session ID cannot be empty.", nameof(id));
 
-            if (session.HostId == userId)
-                throw new InvalidOperationException("The host cannot leave their own session.");
+            if (string.IsNullOrWhiteSpace(userId))
+                throw new UnauthorizedAccessException("User ID not found in token.");
 
-            var participant = session.Participants.FirstOrDefault(p => p.UserId == userId);
-            if (participant is null)
-                throw new KeyNotFoundException("Participant not found.");
+            Guid? removedParticipantId = null;
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-            _context.SessionParticipants.Remove(participant);
-            await _context.SaveChangesAsync(token);
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _context.Database.BeginTransactionAsync(token);
+
+                var session = await GetLockedSessionAsync(id, token)
+                    ?? throw new KeyNotFoundException($"Session with ID '{id}' not found.");
+
+                var participantId = await _context.SessionParticipants.AsNoTracking()
+                    .Where(p => p.GameSessionId == id && p.UserId == userId)
+                    .Select(p => (Guid?)p.Id)
+                    .FirstOrDefaultAsync(token);
+
+                if (removedParticipantId.HasValue && !participantId.HasValue)
+                {
+                    await transaction.CommitAsync(token);
+                    return;
+                }
+
+                if (session.Status != GameSessionStatus.Waiting)
+                    throw new InvalidOperationException("Session must be in Waiting status.");
+
+                if (session.HostId == userId)
+                    throw new InvalidOperationException("The host cannot leave their own session.");
+
+                if (!participantId.HasValue)
+                    throw new KeyNotFoundException("Participant not found.");
+
+                if (removedParticipantId.HasValue && participantId.Value != removedParticipantId.Value)
+                    throw new InvalidOperationException("Membership changed concurrently. Please retry.");
+
+                removedParticipantId = participantId.Value;
+
+                await _context.SessionParticipants
+                    .Where(p => p.Id == participantId.Value && p.GameSessionId == id)
+                    .ExecuteDeleteAsync(token);
+
+                await transaction.CommitAsync(token);
+            });
         }
 
         public async Task SetReadyAsync(Guid id, string userId, bool isReady, CancellationToken token)
@@ -239,7 +320,14 @@ namespace ReadyPlayerOne.Services
             _context.Teams.Add(team);
             await _context.SaveChangesAsync(token);
 
-            return new TeamResponse { Id = team.Id, Name = team.Name, MemberCount = 0 };
+            return new TeamResponse
+            {
+                Id = team.Id,
+                Name = team.Name,
+                MemberCount = 0,
+                MaxMembers = session.PlayersPerTeam!.Value,
+                AvailableSlots = session.PlayersPerTeam.Value
+            };
         }
 
         public async Task JoinTeamAsync(Guid id, Guid teamId, string userId, CancellationToken token)
@@ -408,7 +496,9 @@ namespace ReadyPlayerOne.Services
                 {
                     Id = t.Id,
                     Name = t.Name,
-                    MemberCount = session.Participants.Count(p => p.TeamId == t.Id)
+                    MemberCount = session.Participants.Count(p => p.TeamId == t.Id),
+                    MaxMembers = session.PlayersPerTeam ?? 0,
+                    AvailableSlots = Math.Max(0, (session.PlayersPerTeam ?? 0) - session.Participants.Count(p => p.TeamId == t.Id))
                 }).ToList(),
                 Participants = session.Participants.Select(p => new SessionParticipantResponse
                 {
@@ -424,31 +514,47 @@ namespace ReadyPlayerOne.Services
 
         public async Task DeleteTeamAsync(Guid sessionId, Guid teamId, string userId, bool isAdmin, CancellationToken token)
         {
-            await using var transaction = await _context.Database.BeginTransactionAsync(token);
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-            var session = await GetRequiredSessionAsync(sessionId, token);
-            EnsureOwner(session, userId, isAdmin);
-            EnsureWaiting(session);
-            EnsureTeamBased(session);
-
-            var team = session.Teams.FirstOrDefault(t => t.Id == teamId);
-            if (team is null)
-                throw new KeyNotFoundException($"Team with ID '{teamId}' not found in this session.");
-
-            var members = session.Participants.Where(p => p.TeamId == teamId).ToList();
-
-            foreach (var member in members)
+            await strategy.ExecuteAsync(async () =>
             {
-                member.TeamId = null;
-                member.IsReady = false;
-            }
+                await using var transaction = await _context.Database.BeginTransactionAsync(token);
 
-            await _context.SaveChangesAsync(token);
+                var session = await _context.GameSessions.AsNoTracking()
+                    .Where(s => s.Id == sessionId)
+                    .Select(s => new { s.HostId, s.Status, s.Mode })
+                    .FirstOrDefaultAsync(token);
 
-            _context.Teams.Remove(team);
-            await _context.SaveChangesAsync(token);
+                if (session is null)
+                    throw new KeyNotFoundException("Session not found.");
 
-            await transaction.CommitAsync(token);
+                if (session.HostId != userId && !isAdmin)
+                    throw new UnauthorizedAccessException("Only the host or an administrator can delete a team.");
+
+                if (session.Status != GameSessionStatus.Waiting)
+                    throw new InvalidOperationException("Session must be in Waiting status.");
+
+                if (session.Mode != SessionMode.TeamBased)
+                    throw new InvalidOperationException("This operation is available only in TeamBased mode.");
+
+                bool teamExists = await _context.Teams.AnyAsync(
+                    t => t.Id == teamId && t.GameSessionId == sessionId, token);
+
+                if (!teamExists)
+                    throw new KeyNotFoundException("Team not found.");
+
+                await _context.SessionParticipants
+                    .Where(p => p.GameSessionId == sessionId && p.TeamId == teamId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(p => p.TeamId, (Guid?)null)
+                        .SetProperty(p => p.IsReady, false), token);
+
+                await _context.Teams
+                    .Where(t => t.Id == teamId && t.GameSessionId == sessionId)
+                    .ExecuteDeleteAsync(token);
+
+                await transaction.CommitAsync(token);
+            });
         }
     }
 }

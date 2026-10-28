@@ -21,29 +21,30 @@ namespace ReadyPlayerOne.Repositories
             await _context.SaveChangesAsync(token);
         }
 
-
         public async Task DeleteAsync(Guid id, CancellationToken token)
         {
-            await using var transaction = await _context.Database.BeginTransactionAsync(token);
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-            var session = await _context.GameSessions.FirstOrDefaultAsync(s => s.Id == id, token);
-            if (session is null)
-                return;
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction =
+                    await _context.Database.BeginTransactionAsync(token);
 
-            await _context.SessionParticipants
-                .Where(p => p.GameSessionId == id)
-                .ExecuteDeleteAsync(token);
+                await _context.SessionParticipants
+                    .Where(p => p.GameSessionId == id)
+                    .ExecuteDeleteAsync(token);
 
-            await _context.Teams
-                .Where(t => t.GameSessionId == id)
-                .ExecuteDeleteAsync(token);
+                await _context.Teams
+                    .Where(t => t.GameSessionId == id)
+                    .ExecuteDeleteAsync(token);
 
-            _context.GameSessions.Remove(session);
-            await _context.SaveChangesAsync(token);
+                await _context.GameSessions
+                    .Where(s => s.Id == id)
+                    .ExecuteDeleteAsync(token);
 
-            await transaction.CommitAsync(token);
+                await transaction.CommitAsync(token);
+            });
         }
-
 
         public IQueryable<GameSession> GetAllAsQueryable()
         {

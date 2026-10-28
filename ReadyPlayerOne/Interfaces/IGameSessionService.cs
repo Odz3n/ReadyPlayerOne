@@ -5,7 +5,7 @@ namespace ReadyPlayerOne.Interfaces
 {
     public interface IGameSessionService
     {
-        Task<PagedResult<GameSessionResponse>> GetAllAsync(GameSessionQueryRequest request, CancellationToken token);
+        Task<PagedResult<GameSessionListResponse>> GetAllAsync(GameSessionQueryRequest request, CancellationToken token);
         Task<GameSessionResponse?> GetByIdAsync(Guid id, CancellationToken token);
 
         Task<GameSessionResponse> CreateAsync(CreateGameSessionRequest request, string userId, CancellationToken token);

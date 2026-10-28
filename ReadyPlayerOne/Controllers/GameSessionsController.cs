@@ -4,7 +4,6 @@ using ReadyPlayerOne.DTOs.Common;
 using ReadyPlayerOne.DTOs.GameSessions;
 using ReadyPlayerOne.Interfaces;
 using System.Security.Claims;
-using System.IdentityModel.Tokens.Jwt;
 
 namespace ReadyPlayerOne.Controllers
 {
@@ -19,16 +18,15 @@ namespace ReadyPlayerOne.Controllers
             _sessionService = sessionService;
         }
 
-        private string CurrentUserId =>
-            User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
-                ?? throw new UnauthorizedAccessException("User ID not found in token.");
+        private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? throw new UnauthorizedAccessException("User ID not found in token.");
 
         private bool IsAdmin => User.IsInRole("Admin");
 
         [HttpGet]
         [AllowAnonymous]
-        public async Task<ActionResult<PagedResult<GameSessionResponse>>> GetAll(
+        public async Task<ActionResult<PagedResult<GameSessionListResponse>>> GetAll(
             [FromQuery] GameSessionQueryRequest request, CancellationToken token)
         {
             return Ok(await _sessionService.GetAllAsync(request, token));
@@ -71,16 +69,54 @@ namespace ReadyPlayerOne.Controllers
         [Authorize]
         public async Task<IActionResult> Join(Guid id, CancellationToken token)
         {
-            await _sessionService.JoinAsync(id, CurrentUserId, token);
-            return NoContent();
+            try
+            {
+                await _sessionService.JoinAsync(id, CurrentUserId, token);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session not found", Detail = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid request", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot join session", Detail = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
 
         [HttpPost("{id:guid}/leave")]
         [Authorize]
         public async Task<IActionResult> Leave(Guid id, CancellationToken token)
         {
-            await _sessionService.LeaveAsync(id, CurrentUserId, token);
-            return NoContent();
+            try
+            {
+                await _sessionService.LeaveAsync(id, CurrentUserId, token);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session or participant not found", Detail = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid request", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot leave session", Detail = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
 
         [HttpPut("{id:guid}/ready")]
