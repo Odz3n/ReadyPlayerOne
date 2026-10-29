@@ -1,3 +1,4 @@
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -11,6 +12,7 @@ using ReadyPlayerOne.Interfaces;
 using ReadyPlayerOne.Models;
 using ReadyPlayerOne.Repositories;
 using ReadyPlayerOne.Services;
+using ReadyPlayerOne.Storage;
 using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -151,6 +153,7 @@ builder.Services.AddScoped<IGameService, GameService>();
 builder.Services.AddScoped<IGenreService, GenreService>();
 builder.Services.AddScoped<IGameSessionService, GameSessionService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IBlobImageStorage, BlobImageStorage>();
 
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));
@@ -177,6 +180,11 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+
+// BLOB STORAGE
+var blobConnectionString = builder.Configuration["BlobStorage:ConnectionString"]
+    ?? throw new InvalidOperationException("BlobStorage connection string is missing.");
+builder.Services.AddSingleton(new BlobServiceClient(blobConnectionString));
 
 var app = builder.Build();
 
