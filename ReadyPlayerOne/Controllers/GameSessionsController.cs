@@ -121,67 +121,154 @@ namespace ReadyPlayerOne.Controllers
 
         [HttpPut("{id:guid}/ready")]
         [Authorize]
-        public async Task<IActionResult> SetReady(Guid id, [FromBody] bool isReady, CancellationToken token)
-        {
-            await _sessionService.SetReadyAsync(id, CurrentUserId, isReady, token);
-            return NoContent();
-        }
+        public Task<IActionResult> SetReady(Guid id, [FromBody] bool isReady, CancellationToken token)
+            => ExecuteSessionActionAsync(
+                () => _sessionService.SetReadyAsync(id, CurrentUserId, isReady, token),
+                "Cannot change readiness");
 
         [HttpPost("{id:guid}/teams")]
         [Authorize]
         public async Task<ActionResult<TeamResponse>> CreateTeam(
             Guid id, [FromBody] CreateTeamRequest request, CancellationToken token)
         {
-            var team = await _sessionService.CreateTeamAsync(id, request, CurrentUserId, IsAdmin, token);
-            return Ok(team);
+            try
+            {
+                var team = await _sessionService.CreateTeamAsync(id, request, CurrentUserId, IsAdmin, token);
+                return Ok(team);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid team data", Detail = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session not found", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot create team", Detail = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
 
         [HttpPost("{id:guid}/teams/{teamId:guid}/join")]
         [Authorize]
         public async Task<IActionResult> JoinTeam(Guid id, Guid teamId, CancellationToken token)
         {
-            await _sessionService.JoinTeamAsync(id, teamId, CurrentUserId, token);
-            return NoContent();
+            try
+            {
+                await _sessionService.JoinTeamAsync(id, teamId, CurrentUserId, token);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid team ID", Detail = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session, team or participant not found", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot join team", Detail = ex.Message });
+            }
         }
 
         [HttpPost("{id:guid}/teams/leave")]
         [Authorize]
         public async Task<IActionResult> LeaveTeam(Guid id, CancellationToken token)
         {
-            await _sessionService.LeaveTeamAsync(id, CurrentUserId, token);
-            return NoContent();
+            try
+            {
+                await _sessionService.LeaveTeamAsync(id, CurrentUserId, token);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session or participant not found", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot leave team", Detail = ex.Message });
+            }
         }
+
+
 
         [HttpPost("{id:guid}/start")]
         [Authorize]
-        public async Task<IActionResult> Start(Guid id, CancellationToken token)
-        {
-            await _sessionService.StartAsync(id, CurrentUserId, IsAdmin, token);
-            return NoContent();
-        }
+        public Task<IActionResult> Start(Guid id, CancellationToken token)
+            => ExecuteSessionActionAsync(
+                () => _sessionService.StartAsync(id, CurrentUserId, IsAdmin, token),
+                "Cannot start session");
 
         [HttpPost("{id:guid}/complete")]
         [Authorize]
-        public async Task<IActionResult> Complete(Guid id, CancellationToken token)
-        {
-            await _sessionService.CompleteAsync(id, CurrentUserId, IsAdmin, token);
-            return NoContent();
-        }
+        public Task<IActionResult> Complete(Guid id, CancellationToken token)
+            => ExecuteSessionActionAsync(
+                () => _sessionService.CompleteAsync(id, CurrentUserId, IsAdmin, token),
+                "Cannot complete session");
 
         [HttpPost("{id:guid}/cancel")]
         [Authorize]
-        public async Task<IActionResult> Cancel(Guid id, CancellationToken token)
+        public Task<IActionResult> Cancel(Guid id, CancellationToken token)
+            => ExecuteSessionActionAsync(
+                () => _sessionService.CancelAsync(id, CurrentUserId, IsAdmin, token),
+                "Cannot cancel session");
+
+        private async Task<IActionResult> ExecuteSessionActionAsync(Func<Task> action, string title)
         {
-            await _sessionService.CancelAsync(id, CurrentUserId, IsAdmin, token);
-            return NoContent();
+            try
+            {
+                await action();
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Resource not found", Detail = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid request", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = title, Detail = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
 
         [HttpDelete("{id:guid}/teams/{teamId:guid}")]
         [Authorize]
         public async Task<IActionResult> DeleteTeam(Guid id, Guid teamId, CancellationToken token)
         {
-            await _sessionService.DeleteTeamAsync(id, teamId, CurrentUserId, IsAdmin, token);
-            return NoContent();
+            try
+            {
+                await _sessionService.DeleteTeamAsync(id, teamId, CurrentUserId, IsAdmin, token);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid team ID", Detail = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new ProblemDetails { Status = 404, Title = "Session or team not found", Detail = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new ProblemDetails { Status = 409, Title = "Cannot delete team", Detail = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
         }
     }
 }

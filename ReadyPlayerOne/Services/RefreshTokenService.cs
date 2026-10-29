@@ -11,10 +11,13 @@ namespace ReadyPlayerOne.Services
     public class RefreshTokenService: IRefreshTokenService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IServiceScopeFactory _scopeFactory;
         public RefreshTokenService(
-            ApplicationDbContext context)
+            ApplicationDbContext context,
+            IServiceScopeFactory scopeFactory)
         {
             _context = context;
+            _scopeFactory = scopeFactory;
         }
         private static string GenerateToken()
         {
@@ -39,57 +42,94 @@ namespace ReadyPlayerOne.Services
 
             return (rawToken, entity);
         }
+
         public async Task<(string RawToken, ApplicationUser User)?> RotateAsync(string rawToken)
         {
             var hash = HashToken(rawToken);
             var now = DateTime.UtcNow;
 
-            await using var transaction = await _context.Database
-                .BeginTransactionAsync(IsolationLevel.Serializable);
+            // Generate once so retries reuse the same token and identity.
+            var newRawToken = GenerateToken();
+            var newTokenHash = HashToken(newRawToken);
+            var newTokenId = Guid.NewGuid();
 
-            var oldToken = await _context.RefreshTokens
-                .Include(x => x.User)
-                .SingleOrDefaultAsync(x => x.TokenHash == hash);
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-            if (oldToken == null)
-                return null;
-
-            if (oldToken.RevokedAt != null)
+            return await strategy.ExecuteAsync<(string RawToken, ApplicationUser User)?>(async () =>
             {
-                if (oldToken.ReplacedByTokenId != null)
-                {
-                    await _context.RefreshTokens
-                        .Where(x => x.FamilyId == oldToken.FamilyId && x.RevokedAt == null)
-                        .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.RevokedAt, now));
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-                    await transaction.CommitAsync();
+                await using var transaction = await db.Database
+                    .BeginTransactionAsync(IsolationLevel.Serializable);
+
+                // Lock the old token during validation and rotation.
+                var oldToken = await db.RefreshTokens
+                    .FromSqlInterpolated(
+                        $"SELECT * FROM [RefreshTokens] WITH (UPDLOCK, HOLDLOCK) WHERE [TokenHash] = {hash}")
+                    .Include(x => x.User)
+                    .SingleOrDefaultAsync();
+
+                if (oldToken is null)
+                    return null;
+
+                if (oldToken.RevokedAt != null)
+                {
+                    // Our previous attempt may have committed successfully
+                    // but lost the connection during commit.
+                    if (oldToken.ReplacedByTokenId == newTokenId)
+                    {
+                        bool committed = await db.RefreshTokens.AnyAsync(
+                            x => x.Id == newTokenId &&
+                                 x.TokenHash == newTokenHash);
+
+                        if (!committed)
+                            throw new InvalidOperationException(
+                                "Inconsistent refresh token rotation state.");
+
+                        return (newRawToken, oldToken.User);
+                    }
+
+                    // Another rotation already replaced this token.
+                    // Preserve the existing reuse-detection policy.
+                    if (oldToken.ReplacedByTokenId != null)
+                    {
+                        await db.RefreshTokens
+                            .Where(x => x.FamilyId == oldToken.FamilyId &&
+                                        x.RevokedAt == null)
+                            .ExecuteUpdateAsync(setters =>
+                                setters.SetProperty(x => x.RevokedAt, now));
+
+                        await transaction.CommitAsync();
+                    }
+
+                    return null;
                 }
 
-                return null;
-            }
+                if (oldToken.ExpiresAt <= now)
+                    return null;
 
-            if (oldToken.ExpiresAt <= now)
-                return null;
+                var newToken = new RefreshToken
+                {
+                    Id = newTokenId,
+                    UserId = oldToken.UserId,
+                    FamilyId = oldToken.FamilyId,
+                    TokenHash = newTokenHash,
+                    ExpiresAt = now.AddDays(7)
+                };
 
-            var newRawToken = GenerateToken();
-            var newToken = new RefreshToken
-            {
-                UserId = oldToken.UserId,
-                FamilyId = oldToken.FamilyId,
-                TokenHash = HashToken(newRawToken),
-                ExpiresAt = now.AddDays(7)
-            };
+                oldToken.RevokedAt = now;
+                oldToken.ReplacedByTokenId = newToken.Id;
 
-            oldToken.RevokedAt = now;
-            oldToken.ReplacedByTokenId = newToken.Id;
+                db.RefreshTokens.Add(newToken);
 
-            _context.RefreshTokens.Add(newToken);
+                await db.SaveChangesAsync();
+                await transaction.CommitAsync();
 
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return (newRawToken, oldToken.User);
+                return (newRawToken, oldToken.User);
+            });
         }
+
         public async Task RevokeAsync(string rawToken)
         {
             var hash = HashToken(rawToken);
