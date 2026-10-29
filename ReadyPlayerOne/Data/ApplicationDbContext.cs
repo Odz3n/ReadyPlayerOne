@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using ReadyPlayerOne.Models;
+using System.Reflection.Emit;
 
 namespace ReadyPlayerOne.Data;
 
@@ -17,6 +18,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<GameSession> GameSessions => Set<GameSession>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
     public DbSet<Team> Teams => Set<Team>();
+    public DbSet<SessionBan> SessionBans => Set<SessionBan>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -158,5 +160,32 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         {
             e.Property(u => u.AvatarUrl).HasMaxLength(2048);
         });
-    }
+
+		// Session bans
+		builder.Entity<SessionBan>(e =>
+		{
+			e.HasKey(b => b.Id);
+
+			e.HasIndex(b => new
+			{
+				b.GameSessionId,
+				b.UserId
+			}).IsUnique();
+
+			e.HasOne(b => b.User)
+				.WithMany()
+				.HasForeignKey(b => b.UserId)
+				.OnDelete(DeleteBehavior.Restrict);
+            
+            e.HasOne(b => b.GameSession)
+                .WithMany()
+				.HasForeignKey(b => b.GameSessionId)
+				.OnDelete(DeleteBehavior.Cascade);
+
+			e.HasOne(b => b.BannedByUser)
+	            .WithMany()
+	            .HasForeignKey(b => b.BannedByUserId)
+	            .OnDelete(DeleteBehavior.Restrict);
+		});
+	}
 }

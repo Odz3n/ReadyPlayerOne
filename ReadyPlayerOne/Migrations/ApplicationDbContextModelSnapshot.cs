@@ -164,7 +164,8 @@ namespace ReadyPlayerOne.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("AvatarUrl")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("Bio")
                         .HasColumnType("nvarchar(max)");
@@ -388,6 +389,41 @@ namespace ReadyPlayerOne.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
+            modelBuilder.Entity("ReadyPlayerOne.Models.SessionBan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BannedByUserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GameSessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BannedByUserId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("GameSessionId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("SessionBans");
+                });
+
             modelBuilder.Entity("ReadyPlayerOne.Models.SessionParticipant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -534,6 +570,33 @@ namespace ReadyPlayerOne.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ReadyPlayerOne.Models.SessionBan", b =>
+                {
+                    b.HasOne("ReadyPlayerOne.Models.ApplicationUser", "BannedByUser")
+                        .WithMany()
+                        .HasForeignKey("BannedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ReadyPlayerOne.Models.GameSession", "GameSession")
+                        .WithMany()
+                        .HasForeignKey("GameSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ReadyPlayerOne.Models.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BannedByUser");
+
+                    b.Navigation("GameSession");
 
                     b.Navigation("User");
                 });

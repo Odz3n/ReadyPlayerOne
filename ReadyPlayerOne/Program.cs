@@ -154,6 +154,7 @@ builder.Services.AddScoped<IGenreService, GenreService>();
 builder.Services.AddScoped<IGameSessionService, GameSessionService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IBlobImageStorage, BlobImageStorage>();
+builder.Services.AddScoped<ISessionModerationService, SessionModerationService>();
 
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));
